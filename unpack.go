@@ -14,6 +14,16 @@ import (
 	"github.com/pkg/errors"
 )
 
+func setXattrs(path string, header *tar.Header) error {
+	for key, value := range header.Xattrs {
+		if err := Lsetxattr(path, key, []byte(value), 0); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
 func luTimesNano(path string, ts []syscall.Timespec) error {
 	var (
 		_path *byte
@@ -235,8 +245,11 @@ func handleTarEntry(targetPaths map[string]string, fullPath, dest string, header
 		return err
 	}
 
-	err = setPermissions(fullPath, header, options)
-	if err != nil {
+	if err := setPermissions(fullPath, header, options); err != nil {
+		return err
+	}
+
+	if err := setXattrs(fullPath, header); err != nil {
 		return err
 	}
 
