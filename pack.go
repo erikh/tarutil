@@ -3,15 +3,48 @@ package tarutil
 import (
 	"archive/tar"
 	"context"
+	"fmt"
 	"io"
 	"os"
 	"path"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
 	"github.com/pkg/errors"
 )
+
+func getWhiteoutHeader(header *tar.Header, p string) *tar.Header {
+	dirPath := path.Dir(p)
+	basePath := path.Base(p)
+
+	tmp := *header
+	ret := &tmp
+
+	if strings.HasPrefix(basePath, whiteoutPrefix) {
+		ret.Size = 0
+
+		if strings.HasPrefix(basePath, whiteoutLinkDir) || strings.HasPrefix(basePath, whiteoutOpaqueDir) {
+			basePath = strings.TrimPrefix(basePath, whiteoutOpaqueDir)
+			basePath = strings.TrimPrefix(basePath, whiteoutLinkDir)
+			ret.Name = path.Join(dirPath, basePath)
+			ret.Linkname = ""
+			ret.Typeflag = tar.TypeDir
+		}
+
+		if strings.HasPrefix(basePath, whiteoutPrefix) {
+			basePath = strings.TrimPrefix(basePath, whiteoutPrefix)
+			ret.Name = path.Join(dirPath, basePath)
+			ret.Linkname = ""
+			ret.Typeflag = tar.TypeReg
+		}
+
+		return ret
+	}
+
+	return nil
+}
 
 func prepHeader(p, linkName, rel string, hardLink bool, fi os.FileInfo) (*tar.Header, error) {
 	header, err := tar.FileInfoHeader(fi, linkName)
@@ -91,13 +124,39 @@ func getLink(source, p string, fi os.FileInfo, inodeTable map[uint64]string) (st
 
 // Pack packs a tarball from the specified source, into the writer w. Returns
 // an error.
-func Pack(ctx context.Context, source string, w io.Writer) error {
+func Pack(ctx context.Context, source string, out io.Writer, filter bool) error {
+	whiteout := NewOverlayWhiteouts()
+
 	inodeTable := map[uint64]string{}
 
-	tw := tar.NewWriter(w)
+	var tw *tar.Writer
+
+	if filter {
+		r, w := io.Pipe()
+		tw = tar.NewWriter(w)
+		go func() {
+			filterOut, err := FilterTarUsingFilter(r, whiteout)
+			if err != nil {
+				w.CloseWithError(err)
+				return
+			}
+
+			if _, err := io.Copy(out, filterOut); err != nil {
+				w.CloseWithError(err)
+				return
+			}
+		}()
+	} else {
+		tw = tar.NewWriter(out)
+	}
+
 	defer tw.Close()
 
 	err := filepath.Walk(source, func(p string, fi os.FileInfo, err error) error {
+		if fi.Size() == 253952 {
+			fmt.Fprintln(os.Stderr, fi.Name())
+		}
+
 		if p == source {
 			return nil
 		}
@@ -126,22 +185,33 @@ func Pack(ctx context.Context, source string, w io.Writer) error {
 		}
 
 		if !fi.IsDir() && (header.Typeflag == tar.TypeReg || header.Typeflag == tar.TypeRegA) {
-			abs, err := filepath.Abs(p)
-			if err != nil {
+			if err := copyFile(p, tw); err != nil {
 				return err
 			}
-			f, err := os.Open(abs)
-			if err != nil {
-				return err
-			}
-			_, err = io.Copy(tw, f)
-			if err != nil {
-				return err
-			}
-			f.Close()
 		}
+
 		return nil
 	})
 
 	return err
+}
+
+func copyFile(p string, tw *tar.Writer) error {
+	abs, err := filepath.Abs(p)
+	if err != nil {
+		return err
+	}
+
+	f, err := os.Open(abs)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+
+	_, err = io.Copy(tw, f)
+	if err != nil {
+		return err
+	}
+
+	return nil
 }

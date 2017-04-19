@@ -4,6 +4,8 @@ import (
 	"archive/tar"
 	"fmt"
 	"io"
+	"io/ioutil"
+	"os"
 	"path/filepath"
 	"strings"
 )
@@ -26,10 +28,12 @@ func FilterTarUsingFilter(r io.Reader, f TarFilter) (io.Reader, error) {
 		writeHeader bool
 	)
 
-	if err := f.SetTarWriter(tw); err != nil {
-		return nil, err
-	}
 	go func() {
+		if err := f.SetTarWriter(tw); err != nil {
+			pw.CloseWithError(err)
+			return
+		}
+
 		for {
 			hdr, err := tr.Next()
 			if err == io.EOF {
@@ -39,32 +43,37 @@ func FilterTarUsingFilter(r io.Reader, f TarFilter) (io.Reader, error) {
 			}
 
 			if err != nil {
-				pw.Close()
+				pw.CloseWithError(err)
 				break
 			}
 
 			writeData, writeHeader, err = f.HandleEntry(hdr)
 			if err != nil {
-				pw.Close()
+				pw.CloseWithError(err)
 				break
 			}
 
 			if !writeHeader {
 				continue
 			}
+
 			err = tw.WriteHeader(hdr)
 			if err != nil {
-				pw.Close()
+				pw.CloseWithError(err)
 				break
 			}
 
-			if !writeData || hdr.Size == 0 {
+			if !writeData && hdr.Size > 0 {
+				io.Copy(ioutil.Discard, tr)
+			}
+
+			if hdr.Size == 0 {
 				continue
 			}
 
 			_, err = io.Copy(tw, tr)
 			if err != nil {
-				pw.Close()
+				pw.CloseWithError(err)
 				break
 			}
 		}
@@ -83,7 +92,6 @@ func NewOverlayWhiteouts() *OverlayWhiteouts {
 	return &OverlayWhiteouts{
 		dirs: make(map[string]*tar.Header),
 	}
-
 }
 
 // SetTarWriter sets the tar writer for output processing.
@@ -130,13 +138,13 @@ func (o *OverlayWhiteouts) HandleEntry(h *tar.Header) (bool, bool, error) {
 			return false, true, nil
 		}
 		if err := o.tw.WriteHeader(dirHeader); err != nil {
+			fmt.Fprintln(os.Stderr, "here")
 			return false, false, err
 		}
-
 	}
 
 	if strings.HasPrefix(base, whiteoutPrefix) {
-		convertWhiteoutToOverlay(h, dir, base)
+		// convertWhiteoutToOverlay(h, dir, base)
 		return false, true, nil
 	}
 	return true, true, nil

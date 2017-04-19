@@ -85,7 +85,7 @@ func TestPack(t *testing.T) {
 	r, w := io.Pipe()
 
 	go func() {
-		if err := Pack(context.Background(), packDir, w); err != nil {
+		if err := Pack(context.Background(), packDir, w, false); err != nil {
 			panic(err) // t.Fatal is a little dodgy in goroutines
 		}
 	}()

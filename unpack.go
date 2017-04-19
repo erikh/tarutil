@@ -296,12 +296,12 @@ func UnpackTar(ctx context.Context, r io.Reader, dest string, options *Options) 
 		}
 
 		fullPath := filepath.Join(dest, hdr.Name)
-		base := filepath.Base(fullPath)
+		// base := filepath.Base(fullPath)
 
-		if strings.HasPrefix(base, whiteoutPrefix) {
-			handleWhiteouts(fullPath, unpackedPaths)
-			continue
-		}
+		// if strings.HasPrefix(base, whiteoutPrefix) {
+		// 	handleWhiteouts(fullPath, unpackedPaths)
+		// 	continue
+		// }
 
 		if hdr.Name != "/" && hdr.Name != "." {
 			if err := handleTarEntry(targetPaths, fullPath, dest, hdr, tr, options); err != nil {
