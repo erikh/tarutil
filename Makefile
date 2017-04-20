@@ -13,7 +13,7 @@ checks:
 	@bash checks.sh
 
 run_test: checks
-	docker run --rm box-builder/tarutil
+	docker run -e TESTRUN=${TESTRUN} --rm box-builder/tarutil
 
 test: install_box build run_test
 
