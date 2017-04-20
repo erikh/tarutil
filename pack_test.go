@@ -12,6 +12,9 @@ import (
 	"syscall"
 	"testing"
 
+	_ "crypto/sha256"
+
+	digest "github.com/opencontainers/go-digest"
 	"github.com/pkg/errors"
 )
 
@@ -75,7 +78,7 @@ func generateFiles(num, filelen int) (string, []string, error) {
 	return basePath, ret, nil
 }
 
-func TestPack(t *testing.T) {
+func TestPackUnpack(t *testing.T) {
 	packDir, files, err := generateFiles(10, 15)
 	if err != nil {
 		t.Fatal(err)
@@ -94,8 +97,77 @@ func TestPack(t *testing.T) {
 
 	defer os.RemoveAll(unpackDir)
 
-	if err := Unpack(context.Background(), r, unpackDir, nil); err != nil {
+	dg := digest.SHA256.Digester()
+	dg2 := digest.SHA256.Digester()
+
+	pipeR, pipeW := io.Pipe()
+	go func() {
+		_, err := io.Copy(pipeW, io.TeeReader(r, dg.Hash()))
+		pipeW.CloseWithError(err)
+	}()
+
+	if err := Unpack(context.Background(), io.TeeReader(pipeR, dg2.Hash()), unpackDir, nil); err != nil {
 		t.Fatal(err)
+	}
+
+	if dg.Digest() != dg2.Digest() {
+		t.Logf("pack: %v", dg.Digest())
+		t.Logf("unpack: %v", dg2.Digest())
+		t.Fatal("Digest from Pack did not match digest from Unpack")
+	}
+
+	var count int
+
+	if err := filepath.Walk(unpackDir, walkUnpack(unpackDir, files, &count)); err != nil {
+		t.Fatalf("Aborted due to missing file: error: %v", err)
+	}
+
+	if len(files) != count {
+		t.Fatalf("Only walked %d/%d files for some reason...", count, len(files))
+	}
+}
+
+func TestPackUnpackWithFilter(t *testing.T) {
+	packDir, files, err := generateFiles(10, 15)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(packDir)
+
+	r, err := Pack(context.Background(), packDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	unpackDir, err := ioutil.TempDir("", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	defer os.RemoveAll(unpackDir)
+
+	r, err = FilterTarUsingFilter(r, NewOverlayWhiteouts())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	dg := digest.SHA256.Digester()
+	dg2 := digest.SHA256.Digester()
+
+	pipeR, pipeW := io.Pipe()
+	go func() {
+		_, err := io.Copy(pipeW, io.TeeReader(r, dg.Hash()))
+		pipeW.CloseWithError(err)
+	}()
+
+	if err := Unpack(context.Background(), io.TeeReader(pipeR, dg2.Hash()), unpackDir, nil); err != nil {
+		t.Fatal(err)
+	}
+
+	if dg.Digest() != dg2.Digest() {
+		t.Logf("pack: %v", dg.Digest())
+		t.Logf("unpack: %v", dg2.Digest())
+		t.Fatal("Digest from Pack did not match digest from Unpack")
 	}
 
 	var count int
