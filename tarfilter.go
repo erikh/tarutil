@@ -27,8 +27,10 @@ func FilterTarUsingFilter(r io.Reader, f TarFilter) (retReader io.Reader, retErr
 	)
 
 	if err := f.SetTarWriter(tw); err != nil {
+		pw.CloseWithError(err)
 		return nil, err
 	}
+
 	go func() {
 		defer pw.Close()
 		for {
@@ -82,7 +84,6 @@ type OverlayWhiteouts struct {
 // NewOverlayWhiteouts creates a new overlay whiteout filter.
 func NewOverlayWhiteouts() *OverlayWhiteouts {
 	return &OverlayWhiteouts{}
-
 }
 
 // SetTarWriter sets the tar writer for output processing.

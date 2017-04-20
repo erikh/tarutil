@@ -3,8 +3,10 @@ package tarutil
 import (
 	"archive/tar"
 	"context"
+	"fmt"
 	"io"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 	"syscall"
@@ -104,12 +106,49 @@ func createFile(destPath string, fi os.FileInfo, r io.Reader) error {
 }
 
 func createSymlink(dest, destPath string, header *tar.Header) error {
-	targetPath := filepath.Join(filepath.Dir(destPath), header.Linkname)
+	var targetPath string
+
+	if path.IsAbs(filepath.Clean(header.Linkname)) {
+		targetPath = filepath.Join(dest, filepath.Clean(header.Linkname))
+	} else {
+		destDir := filepath.Dir(destPath)
+		fi, err := os.Lstat(destPath)
+		if err != nil {
+			return errors.Wrapf(errInvalidSymlink, "linked file (%q) does not exist: %s", destPath, header.Linkname)
+		}
+
+		if fi.IsDir() {
+			destDir = destPath
+		}
+
+		fn := filepath.Join(destDir, header.Linkname)
+
+		rel, err := filepath.Rel(destPath, fn)
+		if err != nil {
+			return errors.Wrap(errors.Wrap(err, errInvalidSymlink.Error()), header.Linkname)
+		}
+
+		if strings.HasPrefix(rel, "../") {
+			fmt.Println(dest, filepath.Join(filepath.Dir(destPath), rel))
+			rel2, err := filepath.Rel(dest, filepath.Join(destDir, rel))
+			if err != nil {
+				return errors.Wrap(errors.Wrap(err, errInvalidSymlink.Error()), header.Linkname)
+			}
+
+			if strings.HasPrefix(rel2, "../") {
+				return errors.Wrapf(errInvalidSymlink, "%s falls below path root", header.Linkname)
+			}
+			targetPath = rel2
+		} else {
+			targetPath = rel
+		}
+	}
 
 	if !strings.HasPrefix(targetPath, dest) {
 		return errors.Wrap(errInvalidSymlink, header.Linkname)
 	}
-	return os.Symlink(header.Linkname, destPath)
+
+	return os.Symlink(targetPath, destPath)
 }
 
 func mkdev(major, minor int64) uint32 {
@@ -274,7 +313,15 @@ func Unpack(ctx context.Context, r io.Reader, dest string, options *Options) err
 		return err
 	}
 
-	tr := tar.NewReader(r)
+	whiteouts := NewOverlayWhiteouts()
+	defer whiteouts.Close()
+
+	filter, err := FilterTarUsingFilter(r, whiteouts)
+	if err != nil {
+		return err
+	}
+
+	tr := tar.NewReader(filter)
 	unpackedPaths := make(stringMap)
 	targetPaths := map[string]string{}
 

@@ -49,8 +49,18 @@ func generateFiles(num, filelen int) (string, []string, error) {
 	ret := []string{}
 
 	for i := 0; i < num; i++ {
+		var dir string
+		if num%2 == 0 {
+			dir = generateWord(filelen)
+			if err := os.Mkdir(path.Join(basePath, dir), 0700); err != nil {
+				return "", nil, err
+			}
+		} else {
+			dir = ""
+		}
+
 		fn := generateWord(filelen)
-		fullPath := filepath.Join(basePath, fn)
+		fullPath := filepath.Join(basePath, dir, fn)
 		f, err := os.Create(fullPath)
 		if err != nil {
 			return "", nil, err
@@ -70,9 +80,14 @@ func generateFiles(num, filelen int) (string, []string, error) {
 			return "", nil, err
 		}
 
-		ret = append(ret, f.Name())
-		ret = append(ret, f.Name()+".symlink")
-		ret = append(ret, f.Name()+".lnk")
+		name := f.Name()
+
+		if dir != basePath {
+			ret = append(ret, dir)
+		}
+		ret = append(ret, name)
+		ret = append(ret, name+".symlink")
+		ret = append(ret, name+".lnk")
 	}
 
 	return basePath, ret, nil
@@ -196,7 +211,7 @@ func walkUnpack(unpackDir string, files []string, count *int) func(string, os.Fi
 				case ".symlink":
 					fi, err := os.Lstat(p)
 					if err != nil {
-						return err
+						return errors.Wrap(err, p)
 					}
 
 					if fi.Mode()&os.ModeSymlink != os.ModeSymlink {
@@ -205,11 +220,11 @@ func walkUnpack(unpackDir string, files []string, count *int) func(string, os.Fi
 
 					pristine, err := filepath.EvalSymlinks(p)
 					if err != nil {
-						return err
+						return errors.Wrap(err, p)
 					}
 
 					if pristine != strings.TrimSuffix(p, ".symlink") {
-						return errors.Errorf("symlink %q did not link to regular file", p)
+						return errors.Errorf("symlink %q (orig: %s) did not link to regular file", p, pristine)
 					}
 				case ".lnk":
 					fi, err := os.Lstat(p)

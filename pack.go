@@ -7,6 +7,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -55,17 +56,25 @@ func getLink(source, p string, fi os.FileInfo, inodeTable map[uint64]string) (st
 
 		var rel string
 
-		// coerce the path to be a relative symlink.
+		follow = filepath.Clean(follow)
+
 		if path.IsAbs(follow) {
-			rel, err = filepath.Rel(path.Dir(p), follow)
+			rel, err = filepath.Rel(source, follow)
+			if err != nil {
+				return "", false, errors.Wrap(errInvalidSymlink, err.Error())
+			}
+
+			if strings.HasPrefix(rel, "../") {
+				return "", false, errors.Wrap(errInvalidSymlink, "symlink falls below root")
+			}
 		} else {
-			rel, err = filepath.Rel(path.Dir(p), path.Join(path.Dir(p), follow))
+			rel, err = filepath.Rel(p, follow)
+			if err != nil {
+				return "", false, errors.Wrap(errInvalidSymlink, err.Error())
+			}
 		}
 
-		if err != nil {
-			return "", false, errors.Wrap(errInvalidSymlink, err.Error())
-		}
-		return rel, false, nil
+		return "/" + filepath.Clean(rel), false, nil
 	}
 
 	inode := fi.Sys().(*syscall.Stat_t).Ino
@@ -94,14 +103,6 @@ func Pack(ctx context.Context, source string) (filter io.Reader, retErr error) {
 	inodeTable := map[uint64]string{}
 
 	r, w := io.Pipe()
-
-	whiteouts := NewOverlayWhiteouts()
-	defer whiteouts.Close()
-
-	filter, err := FilterTarUsingFilter(r, whiteouts)
-	if err != nil {
-		return nil, err
-	}
 
 	go func() {
 		tw := tar.NewWriter(w)
@@ -160,5 +161,5 @@ func Pack(ctx context.Context, source string) (filter io.Reader, retErr error) {
 		w.Close()
 	}()
 
-	return filter, nil
+	return r, nil
 }
