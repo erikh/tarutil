@@ -89,59 +89,76 @@ func getLink(source, p string, fi os.FileInfo, inodeTable map[uint64]string) (st
 	return "", false, nil
 }
 
-// Pack packs a tarball from the specified source, into the writer w. Returns
-// an error.
-func Pack(ctx context.Context, source string, w io.Writer) error {
+// Pack packs a tarball from the specified source, into the reader it returns.
+func Pack(ctx context.Context, source string) (filter io.Reader, retErr error) {
 	inodeTable := map[uint64]string{}
 
-	tw := tar.NewWriter(w)
-	defer tw.Close()
+	r, w := io.Pipe()
 
-	err := filepath.Walk(source, func(p string, fi os.FileInfo, err error) error {
-		if p == source {
+	whiteouts := NewOverlayWhiteouts()
+	defer whiteouts.Close()
+
+	filter, err := FilterTarUsingFilter(r, whiteouts)
+	if err != nil {
+		return nil, err
+	}
+
+	go func() {
+		tw := tar.NewWriter(w)
+		defer tw.Close()
+
+		err := filepath.Walk(source, func(p string, fi os.FileInfo, err error) error {
+			if p == source {
+				return nil
+			}
+
+			if err != nil {
+				return err
+			}
+
+			rel, err := filepath.Rel(source, p)
+			if err != nil {
+				return err
+			}
+
+			linkName, hardLink, err := getLink(source, p, fi, inodeTable)
+			if err != nil {
+				return err
+			}
+
+			header, err := prepHeader(p, linkName, rel, hardLink, fi)
+			if err != nil {
+				return err
+			}
+
+			if err := tw.WriteHeader(header); err != nil {
+				return err
+			}
+
+			if !fi.IsDir() && (header.Typeflag == tar.TypeReg || header.Typeflag == tar.TypeRegA) {
+				abs, err := filepath.Abs(p)
+				if err != nil {
+					return err
+				}
+				f, err := os.Open(abs)
+				if err != nil {
+					return err
+				}
+				_, err = io.Copy(tw, f)
+				if err != nil {
+					return err
+				}
+				f.Close()
+			}
 			return nil
-		}
+		})
 
 		if err != nil {
-			return err
+			w.CloseWithError(err)
 		}
 
-		rel, err := filepath.Rel(source, p)
-		if err != nil {
-			return err
-		}
+		w.Close()
+	}()
 
-		linkName, hardLink, err := getLink(source, p, fi, inodeTable)
-		if err != nil {
-			return err
-		}
-
-		header, err := prepHeader(p, linkName, rel, hardLink, fi)
-		if err != nil {
-			return err
-		}
-
-		if err := tw.WriteHeader(header); err != nil {
-			return err
-		}
-
-		if !fi.IsDir() && (header.Typeflag == tar.TypeReg || header.Typeflag == tar.TypeRegA) {
-			abs, err := filepath.Abs(p)
-			if err != nil {
-				return err
-			}
-			f, err := os.Open(abs)
-			if err != nil {
-				return err
-			}
-			_, err = io.Copy(tw, f)
-			if err != nil {
-				return err
-			}
-			f.Close()
-		}
-		return nil
-	})
-
-	return err
+	return filter, nil
 }

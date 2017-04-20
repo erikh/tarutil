@@ -4,8 +4,11 @@ import (
 	"archive/tar"
 	"fmt"
 	"io"
+	"os"
 	"testing"
 )
+
+var debug = os.Getenv("DEBUG") != ""
 
 type NullFilter struct {
 	tw *tar.Writer
@@ -29,7 +32,7 @@ func (n *NullFilter) HandleEntry(h *tar.Header) (bool, bool, error) {
 
 func TestConsumeTar(t *testing.T) {
 	r := generateTar(25)
-	items, err := loopTar(r, false)
+	items, err := loopTar(r, debug)
 	if err != nil {
 		t.Fatalf("encountered error: %v", err)
 	}
@@ -50,7 +53,7 @@ func TestTarFilterWithNullFilter(t *testing.T) {
 		t.Fatalf("failed to instantiate filter")
 	}
 
-	items, err := loopTar(fr, false)
+	items, err := loopTar(fr, debug)
 	if err != nil {
 		t.Fatalf("encountered error: %v", err)
 	}
@@ -71,7 +74,7 @@ func TestOverlayWhiteoutsWithDummyFiles(t *testing.T) {
 		t.Fatalf("failed to instantiate filter")
 	}
 
-	items, err := loopTar(fr, false)
+	items, err := loopTar(fr, debug)
 	if err != nil {
 		t.Fatalf("encountered error: %v", err)
 	}

@@ -82,13 +82,10 @@ func TestPack(t *testing.T) {
 	}
 	defer os.RemoveAll(packDir)
 
-	r, w := io.Pipe()
-
-	go func() {
-		if err := Pack(context.Background(), packDir, w); err != nil {
-			panic(err) // t.Fatal is a little dodgy in goroutines
-		}
-	}()
+	r, err := Pack(context.Background(), packDir)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	unpackDir, err := ioutil.TempDir("", "")
 	if err != nil {
@@ -108,7 +105,7 @@ func TestPack(t *testing.T) {
 	}
 
 	if len(files) != count {
-		t.Fatal("Did not walk all files for some reason...")
+		t.Fatalf("Only walked %d/%d files for some reason...", count, len(files))
 	}
 }
 
