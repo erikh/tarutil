@@ -3,7 +3,6 @@ package tarutil
 import (
 	"archive/tar"
 	"context"
-	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -105,17 +104,7 @@ func createFile(destPath string, fi os.FileInfo, r io.Reader) error {
 }
 
 func createSymlink(dest, destPath string, header *tar.Header) error {
-	subPath, err := filepath.Rel(dest, destPath)
-	if err != nil {
-		return err
-	}
-
-	targetPath, err := filepath.Rel(subPath, filepath.Clean(header.Linkname))
-	if err != nil {
-		return err
-	}
-
-	fmt.Println(subPath, targetPath, destPath)
+	targetPath := filepath.Clean(header.Linkname)
 
 	return os.Symlink(targetPath, destPath)
 }
