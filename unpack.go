@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path"
 	"path/filepath"
 	"strings"
 	"syscall"
@@ -106,47 +105,17 @@ func createFile(destPath string, fi os.FileInfo, r io.Reader) error {
 }
 
 func createSymlink(dest, destPath string, header *tar.Header) error {
-	var targetPath string
-
-	if path.IsAbs(filepath.Clean(header.Linkname)) {
-		targetPath = filepath.Join(dest, filepath.Clean(header.Linkname))
-	} else {
-		destDir := filepath.Dir(destPath)
-		fi, err := os.Lstat(destPath)
-		if err != nil {
-			return errors.Wrapf(errInvalidSymlink, "linked file (%q) does not exist: %s", destPath, header.Linkname)
-		}
-
-		if fi.IsDir() {
-			destDir = destPath
-		}
-
-		fn := filepath.Join(destDir, header.Linkname)
-
-		rel, err := filepath.Rel(destPath, fn)
-		if err != nil {
-			return errors.Wrap(errors.Wrap(err, errInvalidSymlink.Error()), header.Linkname)
-		}
-
-		if strings.HasPrefix(rel, "../") {
-			fmt.Println(dest, filepath.Join(filepath.Dir(destPath), rel))
-			rel2, err := filepath.Rel(dest, filepath.Join(destDir, rel))
-			if err != nil {
-				return errors.Wrap(errors.Wrap(err, errInvalidSymlink.Error()), header.Linkname)
-			}
-
-			if strings.HasPrefix(rel2, "../") {
-				return errors.Wrapf(errInvalidSymlink, "%s falls below path root", header.Linkname)
-			}
-			targetPath = rel2
-		} else {
-			targetPath = rel
-		}
+	subPath, err := filepath.Rel(dest, destPath)
+	if err != nil {
+		return err
 	}
 
-	if !strings.HasPrefix(targetPath, dest) {
-		return errors.Wrap(errInvalidSymlink, header.Linkname)
+	targetPath, err := filepath.Rel(subPath, filepath.Clean(header.Linkname))
+	if err != nil {
+		return err
 	}
+
+	fmt.Println(subPath, targetPath, destPath)
 
 	return os.Symlink(targetPath, destPath)
 }
@@ -312,6 +281,14 @@ func Unpack(ctx context.Context, r io.Reader, dest string, options *Options) err
 	if err := createDest(dest); err != nil {
 		return err
 	}
+
+	dir, err := os.Getwd()
+	if err != nil {
+		return err
+	}
+
+	os.Chdir(dest)
+	defer os.Chdir(dir)
 
 	whiteouts := NewOverlayWhiteouts()
 	defer whiteouts.Close()
