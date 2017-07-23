@@ -17,7 +17,7 @@ type TarFilter interface {
 
 // FilterTarUsingFilter accepts a tar file in the io.Reader and a Tarfilter,
 // and then runs the filter repeatedly on the reader.
-func FilterTarUsingFilter(r io.Reader, f TarFilter) (retReader io.Reader, retErr error) {
+func FilterTarUsingFilter(r io.Reader, f TarFilter) (retReader io.ReadCloser, retErr error) {
 	var (
 		pr, pw      = io.Pipe()
 		tr          = tar.NewReader(r)
@@ -32,6 +32,7 @@ func FilterTarUsingFilter(r io.Reader, f TarFilter) (retReader io.Reader, retErr
 	}
 
 	go func() {
+		defer f.Close()
 		defer pw.Close()
 		for {
 			hdr, err := tr.Next()
@@ -100,7 +101,11 @@ func (o *OverlayWhiteouts) Close() error {
 	if o.previousEntry == nil {
 		return nil
 	}
-	return o.tw.WriteHeader(o.previousEntry)
+	if err := o.tw.WriteHeader(o.previousEntry); err != nil {
+		return err
+	}
+
+	return o.tw.Close()
 }
 
 // HandleEntry is the meat and potatoes of the filter; managing the overlay files.

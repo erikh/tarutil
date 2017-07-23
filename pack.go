@@ -99,7 +99,7 @@ func getLink(source, p string, fi os.FileInfo, inodeTable map[uint64]string) (st
 }
 
 // Pack packs a tarball from the specified source, into the reader it returns.
-func Pack(ctx context.Context, source string) (filter io.Reader, retErr error) {
+func Pack(ctx context.Context, source string) (filter io.ReadCloser, retErr error) {
 	inodeTable := map[uint64]string{}
 
 	r, w := io.Pipe()
@@ -161,5 +161,5 @@ func Pack(ctx context.Context, source string) (filter io.Reader, retErr error) {
 		w.Close()
 	}()
 
-	return r, nil
+	return FilterTarUsingFilter(r, NewOverlayWhiteouts())
 }
